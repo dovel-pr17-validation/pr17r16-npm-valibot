@@ -1,0 +1,301 @@
+import {
+  $,
+  component$,
+  type QRL,
+  type ReadonlySignal,
+  Slot,
+  useComputed$,
+} from '@builder.io/qwik';
+import {
+  type ContentMenu,
+  useContent,
+  useDocumentHead,
+  useLocation,
+} from '@builder.io/qwik-city';
+import clsx from 'clsx';
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  GitHubIcon,
+  MarkdownIcon,
+  MenuIcon,
+  PenIcon,
+} from '~/icons';
+import { useChapters, useChaptersToggle } from '~/routes/plugin@chapters';
+import { trackEvent } from '~/utils';
+import { Chapters } from './Chapters';
+import { Credits } from './Credits';
+import { IconButton } from './IconButton';
+import { Navigation } from './Navigation';
+import { SideBar, useSideBarToggle } from './SideBar';
+
+const MDX_PATH_REGEX = /^\/(?:[\w.-]+\/){2}$/;
+
+type NavItem = ContentMenu & { group: string };
+
+/**
+ * Provides the layout for the documentation pages.
+ */
+export const DocsLayout = component$(() => {
+  // Use location, content, docuemnt head and chapters
+  const location = useLocation();
+  const content = useContent();
+  const documentHead = useDocumentHead();
+  const chapters = useChapters();
+
+  // Use side bar and chapters toggle
+  const sideBarToggle = useSideBarToggle();
+  const chaptersToggle = useChaptersToggle();
+
+  // Compute navigation items
+  const navItems = useComputed$(
+    () =>
+      content.menu?.items?.reduce<NavItem[]>(
+        (list, { text, items }) =>
+          items
+            ? [...list, ...items.map((item) => ({ ...item, group: text }))]
+            : list,
+        []
+      ) || []
+  );
+
+  // Compute current navigation index
+  const navIndex = useComputed$(() =>
+    navItems.value.findIndex((item) => item.href === location.url.pathname)
+  );
+
+  // Compute previous, current and next page
+  const prevPage = useComputed$<NavItem | undefined>(
+    () => navItems.value[navIndex.value - 1]
+  );
+  const currentPage = useComputed$<NavItem | undefined>(
+    () => navItems.value[navIndex.value]
+  );
+  const nextPage = useComputed$<NavItem | undefined>(
+    () => navItems.value[navIndex.value + 1]
+  );
+
+  // Compute Markdown path from current location
+  const markdownPath = useComputed$(() =>
+    MDX_PATH_REGEX.test(location.url.pathname)
+      ? `${location.url.pathname.replace(/\/$/, '')}.md`
+      : undefined
+  );
+
+  return (
+    <div
+      class={clsx(
+        'flex w-full flex-1 flex-col self-center lg:flex-row',
+        'no-chapters:max-w-(--breakpoint-xl) max-w-(--breakpoint-2xl)'
+      )}
+    >
+      <main
+        class={clsx(
+          'relative flex-1 py-12 md:py-14 lg:w-px lg:py-24 xl:py-32',
+          'no-chapters:lg:pr-0 lg:pr-9 lg:pl-9'
+        )}
+      >
+        {/* Navigation buttons */}
+        <nav
+          class={clsx(
+            'hidden px-8 lg:absolute lg:flex lg:gap-6 lg:px-10',
+            'no-chapters:lg:right-0 lg:right-9'
+          )}
+        >
+          <NavButtons
+            pageIndex={navIndex.value}
+            sourcePath={documentHead.frontmatter.source}
+            markdownPath={markdownPath.value}
+            prevPage={prevPage.value}
+            nextPage={nextPage.value}
+            chapters={chapters}
+            chaptersToggle={chaptersToggle}
+          />
+        </nav>
+
+        {/* Article */}
+        <article class="mdx flex flex-col">
+          <Slot />
+        </article>
+
+        {currentPage.value?.href && (
+          <nav class="mt-10 flex justify-between px-8 md:mt-12 lg:mt-14 lg:px-10">
+            {/* Edit page buttton */}
+            <IconButton
+              variant="secondary"
+              type="link"
+              href={`https://github.com/open-circle/valibot/blob/main/website/src/routes${currentPage.value.href.replace(
+                /^(\/.+)\/(.+\/)$/,
+                `$1/(${currentPage.value.group
+                  .toLowerCase()
+                  .replace(/\s/g, '-')})/$2`
+              )}index.mdx`}
+              target="_blank"
+              label="Edit page"
+            >
+              <PenIcon class="h-[18px]" />
+            </IconButton>
+
+            {/* Next page button */}
+            {nextPage.value?.href && (
+              <div class="hidden lg:block">
+                <IconButton
+                  variant="secondary"
+                  type="link"
+                  href={nextPage.value.href}
+                  label="Next page"
+                  align="right"
+                >
+                  <ArrowRightIcon class="h-[18px]" />
+                </IconButton>
+              </div>
+            )}
+          </nav>
+        )}
+
+        {/* Credits */}
+        <Credits />
+      </main>
+
+      {/* Rendered after the main content so that the article comes first in
+          the DOM for crawlers and AI agents, but displayed before it via CSS
+          ordering to keep the visual layout unchanged. */}
+      <SideBar
+        class="lg:order-first lg:max-h-[calc(100vh-70px)]"
+        toggle={sideBarToggle}
+      >
+        <div q:slot="buttons" class="mr-4 flex gap-6 lg:hidden">
+          <NavButtons
+            pageIndex={navIndex.value}
+            sourcePath={documentHead.frontmatter.source}
+            markdownPath={markdownPath.value}
+            prevPage={prevPage.value}
+            nextPage={nextPage.value}
+          />
+        </div>
+        <Navigation
+          class={clsx(
+            'px-8 py-9 lg:w-60 lg:py-24 xl:py-32',
+            'no-chapters:2xl:w-72 2xl:w-64'
+          )}
+        />
+      </SideBar>
+
+      {/* Always rendered so the root `.no-chapters` class can hide it before
+          paint without a layout shift. */}
+      <aside class="no-chapters:xl:hidden hidden xl:block xl:w-60 xl:px-8 xl:py-32 2xl:w-64">
+        <Chapters />
+      </aside>
+    </div>
+  );
+});
+
+interface NavButtonsBaseProps {
+  pageIndex: number;
+  sourcePath: string | undefined;
+  markdownPath: string | undefined;
+  prevPage: ContentMenu | undefined;
+  nextPage: ContentMenu | undefined;
+}
+
+interface NavButtonsWithChaptersProps extends NavButtonsBaseProps {
+  chapters: ReadonlySignal<boolean>;
+  chaptersToggle: QRL<() => void>;
+}
+
+interface NavButtonsWithoutChaptersProps extends NavButtonsBaseProps {
+  chapters?: undefined;
+  chaptersToggle?: undefined;
+}
+
+type NavButtonsProps =
+  | NavButtonsWithChaptersProps
+  | NavButtonsWithoutChaptersProps;
+
+/**
+ * Buttons to navigate to the previous or next page.
+ */
+export const NavButtons = component$<NavButtonsProps>(
+  ({
+    pageIndex,
+    sourcePath,
+    markdownPath,
+    prevPage,
+    nextPage,
+    chapters,
+    chaptersToggle,
+  }) => (
+    <>
+      {pageIndex !== -1 && (
+        <>
+          {prevPage?.href ? (
+            <IconButton
+              variant="secondary"
+              type="link"
+              href={prevPage.href}
+              label="Previous page"
+              hideLabel
+            >
+              <ArrowLeftIcon class="h-[18px]" />
+            </IconButton>
+          ) : (
+            <div class="w-10" />
+          )}
+          {nextPage?.href ? (
+            <IconButton
+              variant="secondary"
+              type="link"
+              href={nextPage.href}
+              label="Next page"
+              hideLabel
+            >
+              <ArrowRightIcon class="h-[18px]" />
+            </IconButton>
+          ) : (
+            <div class="w-10" />
+          )}
+        </>
+      )}
+      {chapters && chaptersToggle && (
+        <div class="hidden xl:block">
+          <IconButton
+            variant="secondary"
+            type="button"
+            label={chapters.value ? 'Hide chapters' : 'Show chapters'}
+            hideLabel
+            onClick$={$(() => {
+              trackEvent('change_chapters', { enabled: !chapters.value });
+              chaptersToggle();
+            })}
+          >
+            <MenuIcon class="h-[18px]" />
+          </IconButton>
+        </div>
+      )}
+      {sourcePath && (
+        <IconButton
+          variant="secondary"
+          type="link"
+          href={`https://github.com/open-circle/valibot/blob/main/library/src${sourcePath}`}
+          target="_blank"
+          label="Source code"
+          hideLabel
+        >
+          <GitHubIcon class="h-[18px]" />
+        </IconButton>
+      )}
+      {markdownPath && (
+        <IconButton
+          variant="secondary"
+          type="link"
+          href={markdownPath}
+          target="_blank"
+          label="View as Markdown"
+          hideLabel
+        >
+          <MarkdownIcon class="h-[18px]" />
+        </IconButton>
+      )}
+    </>
+  )
+);
